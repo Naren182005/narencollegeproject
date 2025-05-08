@@ -1,10 +1,10 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { 
-  Linkedin, 
-  Twitter, 
-  Facebook, 
-  Instagram, 
+import {
+  Linkedin,
+  Twitter,
+  Facebook,
+  Instagram,
   Youtube,
   LogIn,
   LogOut,
@@ -12,8 +12,13 @@ import {
   Loader2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { simulateAuth, logout } from '@/lib/social-api';
+import { simulateAuth, disconnectPlatform, getAuthUrl } from '@/lib/social-api';
 import { toast } from '@/components/ui/sonner';
+import {
+  SocialPlatform,
+  removeAuthData,
+  saveAuthData
+} from '@/services/authService';
 
 // Define platform types
 export type PlatformType = 'linkedin' | 'instagram' | 'twitter' | 'facebook' | 'youtube';
@@ -48,6 +53,7 @@ const platformNames = {
 interface SocialAuthButtonProps {
   platform: PlatformType;
   isAuthenticated: boolean;
+  profile?: any;
   onAuthChange: (platform: PlatformType, isAuthenticated: boolean, profile?: any) => void;
   className?: string;
   size?: 'default' | 'sm' | 'lg' | 'icon';
@@ -57,6 +63,7 @@ interface SocialAuthButtonProps {
 export const SocialAuthButton: React.FC<SocialAuthButtonProps> = ({
   platform,
   isAuthenticated,
+  profile,
   onAuthChange,
   className,
   size = 'default',
@@ -66,41 +73,100 @@ export const SocialAuthButton: React.FC<SocialAuthButtonProps> = ({
   const Icon = platformIcons[platform];
   const colorClass = platformColors[platform];
   const name = platformNames[platform];
-  
+
   const handleAuth = async () => {
     if (isAuthenticated) {
-      // Logout
+      // Disconnect
       try {
         setIsLoading(true);
-        await logout(platform);
+
+        // Get the account ID from props or context
+        const accountId = profile?.id;
+        if (!accountId) {
+          throw new Error('Account ID not found');
+        }
+
+        // Remove auth data from localStorage
+        removeAuthData(platform as SocialPlatform);
+
+        // For API integration (can be removed if not needed)
+        const userId = window.localStorage.getItem('userId') || 'demo-user-123';
+        await disconnectPlatform(platform, userId, accountId);
+
         onAuthChange(platform, false);
-        toast.success(`Logged out from ${name}`);
+        toast.success(`Disconnected from ${name}`);
       } catch (error) {
-        console.error(`Error logging out from ${platform}:`, error);
-        toast.error(`Failed to logout from ${name}`);
+        console.error(`Error disconnecting from ${platform}:`, error);
+        toast.error(`Failed to disconnect from ${name}`);
       } finally {
         setIsLoading(false);
       }
     } else {
-      // Login (using simulation for demo)
       try {
         setIsLoading(true);
-        const result = await simulateAuth(platform);
-        if (result.success) {
-          onAuthChange(platform, true, result.profile);
-          toast.success(`Connected to ${name}`);
-        } else {
-          toast.error(`Failed to connect to ${name}`);
+
+        // Get the user ID from props or context
+        const userId = window.localStorage.getItem('userId') || 'demo-user-123';
+
+        // Get the OAuth URL
+        const authUrl = await getAuthUrl(platform, userId);
+
+        if (!authUrl) {
+          throw new Error(`Failed to generate OAuth URL for ${platform}`);
         }
+
+        // Open the OAuth URL in a popup window
+        const width = 600;
+        const height = 700;
+        const left = window.screenX + (window.outerWidth - width) / 2;
+        const top = window.screenY + (window.outerHeight - height) / 2;
+
+        const authWindow = window.open(
+          authUrl,
+          `${platform}-auth`,
+          `width=${width},height=${height},left=${left},top=${top}`
+        );
+
+        // For demo purposes, simulate successful authentication after a delay
+        // In a real app, this would be handled by the OAuth callback
+        setTimeout(() => {
+          if (authWindow) {
+            authWindow.close();
+          }
+
+          // Simulate a successful authentication
+          simulateAuth(platform, userId).then(result => {
+            if (result.success) {
+              // Save the auth data to localStorage
+              saveAuthData(platform as SocialPlatform, {
+                id: result.profile.id,
+                name: result.profile.name,
+                username: result.profile.username,
+                email: result.profile.email,
+                picture: result.profile.picture,
+                accessToken: `mock-token-${Math.random().toString(36).substring(2)}`,
+                refreshToken: `mock-refresh-${Math.random().toString(36).substring(2)}`,
+                expiresAt: Date.now() + 3600000, // 1 hour from now
+              });
+
+              onAuthChange(platform, true, result.profile);
+              toast.success(`Connected to ${name}`);
+            } else {
+              toast.error(`Failed to connect to ${name}`);
+            }
+            setIsLoading(false);
+          });
+        }, 2000);
+
+        return; // Early return to prevent setIsLoading(false) from being called
       } catch (error) {
         console.error(`Error authenticating with ${platform}:`, error);
         toast.error(`Failed to connect to ${name}`);
-      } finally {
         setIsLoading(false);
       }
     }
   };
-  
+
   return (
     <Button
       variant={isAuthenticated ? "default" : "outline"}
@@ -108,30 +174,57 @@ export const SocialAuthButton: React.FC<SocialAuthButtonProps> = ({
       onClick={handleAuth}
       disabled={isLoading}
       className={cn(
-        "transition-all duration-300",
-        isAuthenticated ? "bg-gradient-to-r from-primary/80 to-primary" : "",
+        "transition-all duration-300 font-medium relative overflow-hidden",
+        isAuthenticated
+          ? "bg-gradient-to-r from-primary/80 to-primary shadow-md shadow-primary/20"
+          : "border-gray-700 hover:border-gray-600 hover:bg-gray-800/50",
         className
       )}
     >
-      {isLoading ? (
-        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-      ) : isAuthenticated ? (
-        <>
-          <Check className="h-4 w-4 mr-2" />
-          <Icon className={cn("h-4 w-4", isAuthenticated ? "text-white" : colorClass)} />
-        </>
-      ) : (
-        <>
-          <LogIn className="h-4 w-4 mr-2" />
-          <Icon className={cn("h-4 w-4", colorClass)} />
-        </>
-      )}
-      
-      {showName && (
-        <span className="ml-2">
-          {isAuthenticated ? `${name} Connected` : `Connect ${name}`}
-        </span>
-      )}
+      <div className={cn(
+        "absolute inset-0 opacity-20 transition-opacity",
+        isAuthenticated ? "opacity-30" : "opacity-0"
+      )}>
+        {isAuthenticated && (
+          <div className="absolute inset-0 bg-gradient-to-r from-white/5 to-white/0 animate-pulse"></div>
+        )}
+      </div>
+
+      <div className="relative flex items-center">
+        {isLoading ? (
+          <div className="flex items-center">
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            <span>Connecting...</span>
+          </div>
+        ) : isAuthenticated ? (
+          <>
+            <div className="flex items-center justify-center h-5 w-5 rounded-full bg-white/20 mr-2">
+              <Check className="h-3 w-3 text-white" />
+            </div>
+            <Icon className={cn(
+              "h-5 w-5 transition-transform",
+              isAuthenticated ? "text-white" : colorClass
+            )} />
+          </>
+        ) : (
+          <>
+            <LogIn className="h-4 w-4 mr-2" />
+            <Icon className={cn(
+              "h-5 w-5 transition-transform",
+              colorClass
+            )} />
+          </>
+        )}
+
+        {showName && (
+          <span className={cn(
+            "ml-2 transition-all",
+            isAuthenticated ? "text-white" : ""
+          )}>
+            {isAuthenticated ? `${name} Connected` : `Connect ${name}`}
+          </span>
+        )}
+      </div>
     </Button>
   );
 };

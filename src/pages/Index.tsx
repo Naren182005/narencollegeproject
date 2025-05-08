@@ -4,8 +4,8 @@ import { PlatformCard } from '@/components/PlatformCard';
 import { YouTubeSection } from '@/components/YouTubeSection';
 import { UniversalControls } from '@/components/UniversalControls';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { generateContent as apiGenerateContent, postContent } from '@/lib/api';
-import { postToSocialMedia, postToMultiplePlatforms } from '@/lib/social-api';
+import { generateContent as apiGenerateContent } from '@/lib/api';
+import { postToSocialMedia, postToMultiplePlatforms, getAuthStatus } from '@/lib/social-api';
 import { toast } from '@/components/ui/sonner';
 import { Sparkles, LogIn, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { SocialAuthPanel } from '@/components/SocialAuthPanel';
@@ -119,6 +119,9 @@ const Index = () => {
     setIsPosting(true);
 
     try {
+      // Get the user ID from localStorage or context
+      const userId = window.localStorage.getItem('userId') || 'demo-user-123';
+
       // Create a map of platforms to content
       const platformsContent: Record<string, string | object> = {};
 
@@ -154,7 +157,7 @@ const Index = () => {
       }
 
       // Post to all authenticated platforms
-      const results = await postToMultiplePlatforms(platformsContent);
+      const results = await postToMultiplePlatforms(userId, platformsContent);
 
       // Count successful posts
       const successCount = Object.values(results).filter(result => result.success).length;
@@ -183,6 +186,9 @@ const Index = () => {
     setIsPosting(true);
 
     try {
+      // Get the user ID from localStorage or context
+      const userId = window.localStorage.getItem('userId') || 'demo-user-123';
+
       // Check if there's content to post
       if (!youtubeTitle || !youtubeDescription) {
         toast.error('Please provide a title and description for your YouTube video');
@@ -190,7 +196,7 @@ const Index = () => {
       }
 
       // Post to YouTube
-      const result = await postToSocialMedia('youtube', {
+      const result = await postToSocialMedia('youtube', userId, {
         title: youtubeTitle,
         description: youtubeDescription,
         tags: youtubeTags
@@ -209,10 +215,82 @@ const Index = () => {
     }
   };
 
+  // Function to post content to a specific platform
+  const postContent = async (platform: string, content: string) => {
+    // Check if authenticated with the platform
+    if (!authStatus[platform as PlatformType]) {
+      setShowAuthDialog(true);
+      return;
+    }
+
+    setIsPosting(true);
+
+    try {
+      // Get the user ID from localStorage or context
+      const userId = window.localStorage.getItem('userId') || 'demo-user-123';
+
+      // Check if there's content to post
+      if (!content.trim()) {
+        toast.error(`Please provide content for your ${platformNames[platform as PlatformType]} post`);
+        return;
+      }
+
+      // Post to the platform
+      const result = await postToSocialMedia(platform, userId, content);
+
+      if (result.success) {
+        toast.success(`Content posted to ${platformNames[platform as PlatformType]}`);
+      } else {
+        toast.error(`Failed to post to ${platformNames[platform as PlatformType]}: ${result.error}`);
+      }
+    } catch (error) {
+      console.error(`Error posting to ${platform}:`, error);
+      toast.error(`Failed to post to ${platformNames[platform as PlatformType]}`);
+    } finally {
+      setIsPosting(false);
+    }
+  };
+
   // Handle authentication status change
   const handleAuthStatusChange = (status: Record<PlatformType, boolean>) => {
     setAuthStatus(status);
   };
+
+  // Fetch authentication status on component mount
+  useEffect(() => {
+    const fetchAuthStatus = async () => {
+      try {
+        // Get the user ID from localStorage or context
+        const userId = window.localStorage.getItem('userId') || 'demo-user-123';
+
+        // Store a demo user ID if not already set
+        if (!window.localStorage.getItem('userId')) {
+          window.localStorage.setItem('userId', 'demo-user-123');
+        }
+
+        const status = await getAuthStatus(userId);
+
+        // Update auth status
+        const newAuthStatus: Record<PlatformType, boolean> = {
+          linkedin: false,
+          instagram: false,
+          twitter: false,
+          facebook: false,
+          youtube: false,
+        };
+
+        Object.entries(status.platforms).forEach(([platform, data]) => {
+          newAuthStatus[platform as PlatformType] = data.authenticated;
+        });
+
+        setAuthStatus(newAuthStatus);
+      } catch (error) {
+        console.error('Error fetching auth status:', error);
+      }
+    };
+
+    fetchAuthStatus();
+  }, []);
 
   return (
     <div className="min-h-screen pb-10">
